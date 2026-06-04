@@ -15,26 +15,84 @@ import {
   type MigrationSubmission
 } from "./migration";
 
-const defaultEndpoints: MigrationEndpoints = {
-  ethereumRpcUrl: "",
-  bundlerUrl: "",
-  paymasterUrl: ""
+type EndpointPresetId = "bindle-default" | "privacy-max" | "custom" | "local-dev";
+
+type EndpointPreset = {
+  id: EndpointPresetId;
+  label: string;
+  description: string;
+  endpoints: MigrationEndpoints;
 };
+
+const endpointPresets: Record<EndpointPresetId, EndpointPreset> = {
+  "bindle-default": {
+    id: "bindle-default",
+    label: "Bindle default",
+    description:
+      "Normal migration mode. Uses the same visible public defaults as the main Bindle app.",
+    endpoints: {
+      ethereumRpcUrl: "https://ethereum-rpc.publicnode.com",
+      bundlerUrl: "https://public.pimlico.io/v2/1/rpc",
+      paymasterUrl: ""
+    }
+  },
+  "privacy-max": {
+    id: "privacy-max",
+    label: "Privacy max",
+    description: "Starts with hosted endpoints off for local/self-hosted setup.",
+    endpoints: {
+      ethereumRpcUrl: "",
+      bundlerUrl: "",
+      paymasterUrl: ""
+    }
+  },
+  custom: {
+    id: "custom",
+    label: "Custom",
+    description: "Keep current values and edit each endpoint manually.",
+    endpoints: {
+      ethereumRpcUrl: "",
+      bundlerUrl: "",
+      paymasterUrl: ""
+    }
+  },
+  "local-dev": {
+    id: "local-dev",
+    label: "Local dev",
+    description: "Localhost-style endpoints for development.",
+    endpoints: {
+      ethereumRpcUrl: "http://127.0.0.1:8545",
+      bundlerUrl: "http://127.0.0.1:4337",
+      paymasterUrl: ""
+    }
+  }
+};
+
+const defaultEndpointPreset = endpointPresets["bindle-default"];
 
 const shorten = (value: string | null | undefined): string =>
   value && value.length > 18
     ? `${value.slice(0, 10)}...${value.slice(-6)}`
     : (value ?? "not present");
 
-const endpointMode = (value: string, required = true) => {
+const endpointMode = (
+  value: string,
+  defaultValue: string,
+  preset: EndpointPresetId,
+  required = true
+) => {
   if (!value.trim()) {
     return required ? "required" : "off";
   }
 
   try {
     const url = new URL(value.trim());
-    return url.hostname === "localhost" || url.hostname === "127.0.0.1"
-      ? "local"
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return "local";
+    }
+
+    return preset === "bindle-default" && value.trim() === defaultValue
+      ? "Bindle default"
       : "custom";
   } catch {
     return "invalid";
@@ -50,8 +108,10 @@ export default function App() {
   const [replacementPasskey, setReplacementPasskey] =
     useState<MigrationPasskey | null>(null);
   const [submission, setSubmission] = useState<MigrationSubmission | null>(null);
+  const [endpointPreset, setEndpointPreset] =
+    useState<EndpointPresetId>("bindle-default");
   const [endpoints, setEndpoints] =
-    useState<MigrationEndpoints>(defaultEndpoints);
+    useState<MigrationEndpoints>(defaultEndpointPreset.endpoints);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -143,7 +203,7 @@ export default function App() {
     const confirmed = window.confirm(
       [
         "This will ask the old bindle.me passkey to sign a UserOperation.",
-        "It may contact the Ethereum RPC, ERC-4337 bundler, and optional paymaster shown on this page.",
+        "It may contact the visible Ethereum RPC, ERC-4337 bundler, and optional paymaster shown on this page.",
         "The call adds the replacement passkey public key as an owner of the existing Coinbase Smart Wallet."
       ].join("\n\n")
     );
@@ -201,7 +261,7 @@ export default function App() {
           <p>
             Import a Bindle export, create a replacement passkey, and add it as
             an owner of the same public smart account. Everything runs locally
-            except the explicit endpoints you paste below.
+            except the visible endpoints shown before submission.
           </p>
         </div>
       </section>
@@ -280,7 +340,11 @@ export default function App() {
           <span>3</span>
           <div>
             <h2>Review account and endpoints</h2>
-            <p>No default infrastructure is embedded in this migration app.</p>
+            <p>
+              Bindle defaults are prefilled for normal users. They are not
+              private or trustless, and advanced users can switch them off or
+              replace them.
+            </p>
           </div>
         </div>
         <div className="summary-grid">
@@ -301,48 +365,94 @@ export default function App() {
             <strong>{shorten(replacementPasskey?.publicKey)}</strong>
           </div>
         </div>
+        <div className="preset-row">
+          <label>
+            <span>Endpoint preset</span>
+            <select
+              value={endpointPreset}
+              onChange={(event) => {
+                const nextPreset = event.currentTarget.value as EndpointPresetId;
+                setEndpointPreset(nextPreset);
+                setEndpoints((current) =>
+                  nextPreset === "custom"
+                    ? current
+                    : endpointPresets[nextPreset].endpoints
+                );
+              }}
+            >
+              {Object.values(endpointPresets).map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p>{endpointPresets[endpointPreset].description}</p>
+        </div>
         <div className="endpoint-grid">
           <label>
             <span>Ethereum execution RPC</span>
             <input
               value={endpoints.ethereumRpcUrl}
-              onChange={(event) =>
+              onChange={(event) => {
                 setEndpoints((current) => ({
                   ...current,
                   ethereumRpcUrl: event.currentTarget.value
-                }))
-              }
+                }));
+                setEndpointPreset("custom");
+              }}
               placeholder="https://..."
             />
-            <small>{endpointMode(endpoints.ethereumRpcUrl)}</small>
+            <small>
+              {endpointMode(
+                endpoints.ethereumRpcUrl,
+                defaultEndpointPreset.endpoints.ethereumRpcUrl,
+                endpointPreset
+              )}
+            </small>
           </label>
           <label>
             <span>ERC-4337 bundler</span>
             <input
               value={endpoints.bundlerUrl}
-              onChange={(event) =>
+              onChange={(event) => {
                 setEndpoints((current) => ({
                   ...current,
                   bundlerUrl: event.currentTarget.value
-                }))
-              }
+                }));
+                setEndpointPreset("custom");
+              }}
               placeholder="https://..."
             />
-            <small>{endpointMode(endpoints.bundlerUrl)}</small>
+            <small>
+              {endpointMode(
+                endpoints.bundlerUrl,
+                defaultEndpointPreset.endpoints.bundlerUrl,
+                endpointPreset
+              )}
+            </small>
           </label>
           <label>
             <span>ERC-4337 paymaster</span>
             <input
               value={endpoints.paymasterUrl}
-              onChange={(event) =>
+              onChange={(event) => {
                 setEndpoints((current) => ({
                   ...current,
                   paymasterUrl: event.currentTarget.value
-                }))
-              }
+                }));
+                setEndpointPreset("custom");
+              }}
               placeholder="optional"
             />
-            <small>{endpointMode(endpoints.paymasterUrl, false)}</small>
+            <small>
+              {endpointMode(
+                endpoints.paymasterUrl,
+                defaultEndpointPreset.endpoints.paymasterUrl,
+                endpointPreset,
+                false
+              )}
+            </small>
           </label>
         </div>
       </section>

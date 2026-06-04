@@ -15,9 +15,17 @@ This app keeps the migration boundary explicit:
 - download an updated Bindle account export containing the new credential ID,
   public key, and `passkeyRpId: "bindle.me"`.
 
-No backend is used. No default RPC, bundler, paymaster, analytics, telemetry, or
-hidden endpoints are included. The user must paste every endpoint that may be
-contacted before the migration transaction can be submitted.
+No backend is used. The app defaults to the same visible public endpoints as the
+main Bindle app:
+
+- Ethereum RPC: `https://ethereum-rpc.publicnode.com`
+- ERC-4337 bundler: `https://public.pimlico.io/v2/1/rpc`
+- Paymaster: off
+
+Those defaults are shown in the UI before submission, labelled as Bindle
+defaults, and can be replaced or switched off with Privacy max/custom/local-dev
+presets. No analytics, telemetry, hidden endpoints, or silent phone-home are
+included.
 
 ## Important limitations
 

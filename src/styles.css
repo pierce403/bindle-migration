@@ -25,6 +25,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -192,7 +193,8 @@ small {
 }
 
 textarea,
-input {
+input,
+select {
   width: 100%;
   border: 1px solid rgba(255, 244, 241, 0.16);
   border-radius: 14px;
@@ -207,7 +209,8 @@ textarea {
   resize: vertical;
 }
 
-input {
+input,
+select {
   padding: 12px 13px;
 }
 
@@ -269,6 +272,26 @@ dd,
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.preset-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.35fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+  border: 1px solid rgba(255, 244, 241, 0.11);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.preset-row label {
+  display: grid;
+  gap: 7px;
+}
+
+.preset-row p {
+  padding-bottom: 10px;
+}
+
 .endpoint-grid label {
   display: grid;
   gap: 7px;
@@ -326,6 +349,7 @@ dd,
   .grid,
   .summary-grid,
   .endpoint-grid,
+  .preset-row,
   .action-panel {
     grid-template-columns: 1fr;
   }
