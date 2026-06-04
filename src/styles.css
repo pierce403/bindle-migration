@@ -50,6 +50,11 @@ button.secondary {
   background: rgba(255, 255, 255, 0.08);
 }
 
+button[aria-pressed="true"] {
+  border-color: rgba(255, 117, 130, 0.9);
+  background: rgba(115, 22, 33, 0.78);
+}
+
 code {
   color: #ff7280;
 }
@@ -233,6 +238,26 @@ select {
 .receipt {
   display: grid;
   gap: 12px;
+}
+
+.authenticator-options {
+  display: grid;
+  gap: 10px;
+}
+
+.authenticator-options button {
+  display: grid;
+  gap: 5px;
+  min-height: 72px;
+  border-radius: 16px;
+  text-align: left;
+}
+
+.authenticator-options span {
+  color: #d5bbbb;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .facts {

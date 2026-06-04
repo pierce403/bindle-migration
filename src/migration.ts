@@ -35,6 +35,8 @@ export type WalletState = {
   passkeyCredentialId: string | null;
   passkeyPublicKey: Hex | null;
   passkeyRpId?: string | null;
+  passkeyAuthenticatorAttachment?: AuthenticatorAttachment | null;
+  passkeyUserVerification?: UserVerificationRequirement | null;
 };
 
 export type BindleAccountExport = {
@@ -53,7 +55,12 @@ export type MigrationPasskey = {
   publicKey: Hex;
   rpId: string;
   createdAt: string;
+  authenticatorKind: MigrationAuthenticatorKind;
+  authenticatorAttachment: AuthenticatorAttachment;
+  userVerification: UserVerificationRequirement;
 };
+
+export type MigrationAuthenticatorKind = "platform" | "security-key";
 
 export type MigrationRecord = {
   sourceRpId: string;
@@ -61,6 +68,9 @@ export type MigrationRecord = {
   migratedAt: string;
   newPasskeyCredentialId: string;
   newPasskeyPublicKey: Hex;
+  newPasskeyAuthenticatorKind: MigrationAuthenticatorKind;
+  newPasskeyAuthenticatorAttachment: AuthenticatorAttachment;
+  newPasskeyUserVerification: UserVerificationRequirement;
   smartWalletAddress: string | null;
   userOperationHash?: Hex;
   transactionHash?: Hex | null;
@@ -129,7 +139,18 @@ const normalizeWallet = (value: unknown): WalletState => {
     custodyModel: stringOrNull(value.custodyModel),
     passkeyCredentialId: stringOrNull(value.passkeyCredentialId),
     passkeyPublicKey: hexOrNull(value.passkeyPublicKey),
-    passkeyRpId: stringOrNull(value.passkeyRpId)
+    passkeyRpId: stringOrNull(value.passkeyRpId),
+    passkeyAuthenticatorAttachment:
+      value.passkeyAuthenticatorAttachment === "platform" ||
+      value.passkeyAuthenticatorAttachment === "cross-platform"
+        ? value.passkeyAuthenticatorAttachment
+        : null,
+    passkeyUserVerification:
+      value.passkeyUserVerification === "required" ||
+      value.passkeyUserVerification === "preferred" ||
+      value.passkeyUserVerification === "discouraged"
+        ? value.passkeyUserVerification
+        : null
   };
 };
 
@@ -176,24 +197,35 @@ export const assertMigratableExport = (accountExport: BindleAccountExport) => {
   }
 };
 
-export const createReplacementPasskey = async (): Promise<MigrationPasskey> => {
+export const createReplacementPasskey = async ({
+  authenticatorKind = "platform"
+}: {
+  authenticatorKind?: MigrationAuthenticatorKind;
+} = {}): Promise<MigrationPasskey> => {
   const rpId =
     window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1"
       ? window.location.hostname
       : canonicalRpId;
+  const authenticatorAttachment =
+    authenticatorKind === "security-key" ? "cross-platform" : "platform";
+  const userVerification =
+    authenticatorKind === "security-key" ? "preferred" : "required";
 
   const credential = await createWebAuthnCredential({
-    name: "Bindle migration",
+    name:
+      authenticatorKind === "security-key"
+        ? "Bindle YubiKey recovery"
+        : "Bindle migration",
     rp: {
       id: rpId,
       name: "Bindle"
     },
     authenticatorSelection: {
-      authenticatorAttachment: "platform",
+      authenticatorAttachment,
       residentKey: "preferred",
       requireResidentKey: false,
-      userVerification: "required"
+      userVerification
     },
     attestation: "none",
     timeout: 60_000
@@ -203,7 +235,10 @@ export const createReplacementPasskey = async (): Promise<MigrationPasskey> => {
     id: credential.id,
     publicKey: credential.publicKey,
     rpId,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    authenticatorKind,
+    authenticatorAttachment,
+    userVerification
   };
 };
 
@@ -442,6 +477,10 @@ export const buildUpdatedAccountExport = ({
     migratedAt,
     newPasskeyCredentialId: replacementPasskey.id,
     newPasskeyPublicKey: replacementPasskey.publicKey,
+    newPasskeyAuthenticatorKind: replacementPasskey.authenticatorKind,
+    newPasskeyAuthenticatorAttachment:
+      replacementPasskey.authenticatorAttachment,
+    newPasskeyUserVerification: replacementPasskey.userVerification,
     smartWalletAddress: accountExport.wallet.smartWalletAddress,
     userOperationHash: submission?.userOperationHash,
     transactionHash: submission?.transactionHash
@@ -456,6 +495,8 @@ export const buildUpdatedAccountExport = ({
       passkeyCredentialId: replacementPasskey.id,
       passkeyPublicKey: replacementPasskey.publicKey,
       passkeyRpId: canonicalRpId,
+      passkeyAuthenticatorAttachment: replacementPasskey.authenticatorAttachment,
+      passkeyUserVerification: replacementPasskey.userVerification,
       smartWalletAddress: accountExport.wallet.smartWalletAddress,
       status: accountExport.wallet.railgunAddress
         ? "railgun-ready"
@@ -469,7 +510,8 @@ export const buildUpdatedAccountExport = ({
         ...accountExport.warnings,
         "This export contains replacement passkey metadata but not WebAuthn private key material.",
         "Use this export only after the owner-add UserOperation succeeds, or keep the old export until migration is complete.",
-        "Bindle on bindle.cash must honor passkeyRpId: bindle.me for this passkey to sign there."
+        "Bindle on bindle.cash must honor passkeyRpId: bindle.me for this passkey to sign there.",
+        "Security-key exports require the hardware key to be present when signing."
       ])
     ]
   };

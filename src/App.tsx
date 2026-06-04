@@ -10,6 +10,7 @@ import {
   targetOrigin,
   updatedExportFilename,
   type BindleAccountExport,
+  type MigrationAuthenticatorKind,
   type MigrationEndpoints,
   type MigrationPasskey,
   type MigrationSubmission
@@ -112,6 +113,8 @@ export default function App() {
     useState<EndpointPresetId>("bindle-default");
   const [endpoints, setEndpoints] =
     useState<MigrationEndpoints>(defaultEndpointPreset.endpoints);
+  const [authenticatorKind, setAuthenticatorKind] =
+    useState<MigrationAuthenticatorKind>("platform");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -179,10 +182,12 @@ export default function App() {
     setBusy(true);
 
     try {
-      const credential = await createReplacementPasskey();
+      const credential = await createReplacementPasskey({ authenticatorKind });
       setReplacementPasskey(credential);
       setSubmission(null);
-      setStatus(`Replacement passkey created for RP ID ${credential.rpId}.`);
+      setStatus(
+        `Replacement ${credential.authenticatorKind === "security-key" ? "security key" : "platform passkey"} created for RP ID ${credential.rpId}.`
+      );
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -312,8 +317,34 @@ export default function App() {
             <span>2</span>
             <div>
               <h2>Create replacement passkey</h2>
-              <p>Private key material stays inside the platform authenticator.</p>
+              <p>Private key material stays inside the chosen authenticator.</p>
             </div>
+          </div>
+          <div className="authenticator-options" aria-label="Authenticator type">
+            <button
+              type="button"
+              aria-pressed={authenticatorKind === "platform"}
+              onClick={() => {
+                setAuthenticatorKind("platform");
+                setReplacementPasskey(null);
+                setSubmission(null);
+              }}
+            >
+              <strong>Phone or computer</strong>
+              <span>Platform passkey with user verification required.</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={authenticatorKind === "security-key"}
+              onClick={() => {
+                setAuthenticatorKind("security-key");
+                setReplacementPasskey(null);
+                setSubmission(null);
+              }}
+            >
+              <strong>YubiKey / security key</strong>
+              <span>Roaming authenticator; touch the key when prompted.</span>
+            </button>
           </div>
           <dl className="facts">
             <div>
@@ -328,9 +359,23 @@ export default function App() {
               <dt>Replacement credential</dt>
               <dd>{shorten(replacementPasskey?.id)}</dd>
             </div>
+            <div>
+              <dt>Authenticator</dt>
+              <dd>
+                {replacementPasskey
+                  ? `${replacementPasskey.authenticatorAttachment}; UV ${replacementPasskey.userVerification}`
+                  : authenticatorKind === "security-key"
+                    ? "cross-platform; UV preferred"
+                    : "platform; UV required"}
+              </dd>
+            </div>
           </dl>
           <button onClick={handleCreatePasskey} disabled={busy || !migratable.ok}>
-            {busy ? "Working" : "Create replacement passkey"}
+            {busy
+              ? "Working"
+              : authenticatorKind === "security-key"
+                ? "Create YubiKey credential"
+                : "Create replacement passkey"}
           </button>
         </section>
       </div>
