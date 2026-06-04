@@ -5,11 +5,14 @@ import {
   canonicalRpId,
   createReplacementPasskey,
   downloadJson,
+  migrationPasskeyFromOwnerEnrollment,
   parseBindleAccountExport,
+  parseBindleOwnerEnrollmentCode,
   submitPasskeyOwnerMigration,
   targetOrigin,
   updatedExportFilename,
   type BindleAccountExport,
+  type BindleOwnerEnrollmentCode,
   type MigrationAuthenticatorKind,
   type MigrationEndpoints,
   type MigrationPasskey,
@@ -108,6 +111,9 @@ export default function App() {
   const [importText, setImportText] = useState("");
   const [replacementPasskey, setReplacementPasskey] =
     useState<MigrationPasskey | null>(null);
+  const [ownerEnrollment, setOwnerEnrollment] =
+    useState<BindleOwnerEnrollmentCode | null>(null);
+  const [ownerEnrollmentInput, setOwnerEnrollmentInput] = useState("");
   const [submission, setSubmission] = useState<MigrationSubmission | null>(null);
   const [endpointPreset, setEndpointPreset] =
     useState<EndpointPresetId>("bindle-default");
@@ -135,8 +141,29 @@ export default function App() {
     }
   }, [accountExport]);
 
+  const ownerEnrollmentMatch = useMemo(() => {
+    if (
+      !accountExport?.wallet.smartWalletAddress ||
+      !ownerEnrollment?.smartWalletAddress
+    ) {
+      return { ok: true, message: "" };
+    }
+
+    const ok =
+      accountExport.wallet.smartWalletAddress.toLowerCase() ===
+      ownerEnrollment.smartWalletAddress.toLowerCase();
+
+    return {
+      ok,
+      message: ok
+        ? "Owner enrollment code matches the imported smart account."
+        : "Owner enrollment code is for a different smart-wallet address."
+    };
+  }, [accountExport, ownerEnrollment]);
+
   const canSubmit =
     migratable.ok &&
+    ownerEnrollmentMatch.ok &&
     replacementPasskey !== null &&
     endpoints.ethereumRpcUrl.trim().length > 0 &&
     endpoints.bundlerUrl.trim().length > 0 &&
@@ -150,6 +177,16 @@ export default function App() {
       const parsed = parseBindleAccountExport(importText);
       setAccountExport(parsed);
       setSubmission(null);
+      if (
+        ownerEnrollment?.smartWalletAddress &&
+        parsed.wallet.smartWalletAddress &&
+        ownerEnrollment.smartWalletAddress.toLowerCase() !==
+          parsed.wallet.smartWalletAddress.toLowerCase()
+      ) {
+        setError(
+          "Imported account export does not match the owner enrollment code smart-wallet address."
+        );
+      }
       setStatus("Account export imported locally.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to import export.");
@@ -170,6 +207,16 @@ export default function App() {
       const parsed = parseBindleAccountExport(text);
       setAccountExport(parsed);
       setSubmission(null);
+      if (
+        ownerEnrollment?.smartWalletAddress &&
+        parsed.wallet.smartWalletAddress &&
+        ownerEnrollment.smartWalletAddress.toLowerCase() !==
+          parsed.wallet.smartWalletAddress.toLowerCase()
+      ) {
+        setError(
+          "Imported account export does not match the owner enrollment code smart-wallet address."
+        );
+      }
       setStatus("Account export imported locally.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to import export.");
@@ -184,6 +231,7 @@ export default function App() {
     try {
       const credential = await createReplacementPasskey({ authenticatorKind });
       setReplacementPasskey(credential);
+      setOwnerEnrollment(null);
       setSubmission(null);
       setStatus(
         `Replacement ${credential.authenticatorKind === "security-key" ? "security key" : "platform passkey"} created for RP ID ${credential.rpId}.`
@@ -197,6 +245,39 @@ export default function App() {
       setStatus("");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleImportOwnerEnrollment = () => {
+    setError("");
+    setStatus("");
+
+    try {
+      const enrollment = parseBindleOwnerEnrollmentCode(ownerEnrollmentInput);
+
+      if (
+        accountExport?.wallet.smartWalletAddress &&
+        enrollment.smartWalletAddress &&
+        accountExport.wallet.smartWalletAddress.toLowerCase() !==
+          enrollment.smartWalletAddress.toLowerCase()
+      ) {
+        throw new Error(
+          "Owner enrollment code is for a different smart-wallet address."
+        );
+      }
+
+      setOwnerEnrollment(enrollment);
+      setReplacementPasskey(migrationPasskeyFromOwnerEnrollment(enrollment));
+      setSubmission(null);
+      setStatus(
+        `Owner enrollment code imported for RP ID ${enrollment.credential.rpId}.`
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Unable to import owner enrollment code."
+      );
     }
   };
 
@@ -310,16 +391,35 @@ export default function App() {
           <div className={migratable.ok ? "check ok" : "check"}>
             {migratable.message}
           </div>
+          {ownerEnrollmentMatch.message ? (
+            <div className={ownerEnrollmentMatch.ok ? "check ok" : "check"}>
+              {ownerEnrollmentMatch.message}
+            </div>
+          ) : null}
         </section>
 
         <section className="panel">
           <div className="panel-heading">
             <span>2</span>
-            <div>
-              <h2>Create replacement passkey</h2>
-              <p>Private key material stays inside the chosen authenticator.</p>
+          <div>
+            <h2>Create replacement passkey</h2>
+              <p>
+                Preferred: paste the owner enrollment code created inside the
+                bindle.cash app.
+              </p>
             </div>
           </div>
+          <textarea
+            value={ownerEnrollmentInput}
+            onChange={(event) => setOwnerEnrollmentInput(event.currentTarget.value)}
+            placeholder="Paste bindle-owner-v1:... from bindle.cash Settings."
+          />
+          <button
+            onClick={handleImportOwnerEnrollment}
+            disabled={!ownerEnrollmentInput.trim()}
+          >
+            Import owner enrollment code
+          </button>
           <div className="authenticator-options" aria-label="Authenticator type">
             <button
               type="button"
@@ -348,12 +448,16 @@ export default function App() {
           </div>
           <dl className="facts">
             <div>
-              <dt>Canonical RP ID</dt>
+              <dt>Old signing RP ID</dt>
               <dd>{canonicalRpId}</dd>
             </div>
             <div>
               <dt>Target origin</dt>
               <dd>{targetOrigin}</dd>
+            </div>
+            <div>
+              <dt>New passkey RP ID</dt>
+              <dd>{replacementPasskey?.rpId ?? "not imported"}</dd>
             </div>
             <div>
               <dt>Replacement credential</dt>
@@ -374,8 +478,8 @@ export default function App() {
             {busy
               ? "Working"
               : authenticatorKind === "security-key"
-                ? "Create YubiKey credential"
-                : "Create replacement passkey"}
+                ? "Legacy: create YubiKey here"
+                : "Legacy: create passkey here"}
           </button>
         </section>
       </div>
@@ -408,6 +512,10 @@ export default function App() {
           <div className="summary-card">
             <span>New public key</span>
             <strong>{shorten(replacementPasskey?.publicKey)}</strong>
+          </div>
+          <div className="summary-card">
+            <span>New RP ID</span>
+            <strong>{replacementPasskey?.rpId ?? "not imported"}</strong>
           </div>
         </div>
         <div className="preset-row">

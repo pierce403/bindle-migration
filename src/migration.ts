@@ -62,12 +62,29 @@ export type MigrationPasskey = {
 
 export type MigrationAuthenticatorKind = "platform" | "security-key";
 
+export type BindleOwnerEnrollmentCode = {
+  schema: "cash.bindle.passkey-owner-enrollment";
+  version: 1;
+  createdAt: string;
+  targetOrigin: string;
+  targetRpId: string;
+  smartWalletAddress: string | null;
+  credential: {
+    id: string;
+    publicKey: Hex;
+    rpId: string;
+    authenticatorAttachment: AuthenticatorAttachment;
+    userVerification: UserVerificationRequirement;
+  };
+};
+
 export type MigrationRecord = {
   sourceRpId: string;
   targetOrigin: string;
   migratedAt: string;
   newPasskeyCredentialId: string;
   newPasskeyPublicKey: Hex;
+  newPasskeyRpId: string;
   newPasskeyAuthenticatorKind: MigrationAuthenticatorKind;
   newPasskeyAuthenticatorAttachment: AuthenticatorAttachment;
   newPasskeyUserVerification: UserVerificationRequirement;
@@ -118,6 +135,35 @@ const stringOrNull = (value: unknown): string | null =>
 const hexOrNull = (value: unknown): Hex | null =>
   typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)
     ? (value as Hex)
+    : null;
+
+const decodeBase64Url = (value: string): string => {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    "="
+  );
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+
+  return new TextDecoder().decode(bytes);
+};
+
+const authenticatorKindFromAttachment = (
+  authenticatorAttachment: AuthenticatorAttachment
+): MigrationAuthenticatorKind =>
+  authenticatorAttachment === "cross-platform" ? "security-key" : "platform";
+
+const authenticatorAttachmentOrNull = (
+  value: unknown
+): AuthenticatorAttachment | null =>
+  value === "platform" || value === "cross-platform" ? value : null;
+
+const userVerificationOrNull = (
+  value: unknown
+): UserVerificationRequirement | null =>
+  value === "required" || value === "preferred" || value === "discouraged"
+    ? value
     : null;
 
 const normalizeWallet = (value: unknown): WalletState => {
@@ -196,6 +242,87 @@ export const assertMigratableExport = (accountExport: BindleAccountExport) => {
     throw new Error("Export does not contain the old passkey credential metadata.");
   }
 };
+
+export const parseBindleOwnerEnrollmentCode = (
+  text: string
+): BindleOwnerEnrollmentCode => {
+  const trimmed = text.trim();
+  const jsonText = trimmed.startsWith("bindle-owner-v1:")
+    ? decodeBase64Url(trimmed.slice("bindle-owner-v1:".length))
+    : trimmed;
+  const parsed = JSON.parse(jsonText) as unknown;
+
+  if (!isRecord(parsed)) {
+    throw new Error("Owner enrollment code must decode to a JSON object.");
+  }
+
+  if (
+    parsed.schema !== "cash.bindle.passkey-owner-enrollment" ||
+    parsed.version !== 1
+  ) {
+    throw new Error("Unsupported Bindle owner enrollment code.");
+  }
+
+  if (!isRecord(parsed.credential)) {
+    throw new Error("Owner enrollment code is missing credential metadata.");
+  }
+
+  const publicKey = hexOrNull(parsed.credential.publicKey);
+  const authenticatorAttachment = authenticatorAttachmentOrNull(
+    parsed.credential.authenticatorAttachment
+  );
+  const userVerification = userVerificationOrNull(
+    parsed.credential.userVerification
+  );
+
+  if (!publicKey || !stringOrNull(parsed.credential.id)) {
+    throw new Error("Owner enrollment code has invalid passkey metadata.");
+  }
+
+  if (!authenticatorAttachment || !userVerification) {
+    throw new Error("Owner enrollment code has invalid authenticator policy.");
+  }
+
+  const smartWalletAddress = stringOrNull(parsed.smartWalletAddress);
+
+  if (smartWalletAddress !== null && !isAddress(smartWalletAddress)) {
+    throw new Error("Owner enrollment code has an invalid smart-wallet address.");
+  }
+
+  return {
+    schema: "cash.bindle.passkey-owner-enrollment",
+    version: 1,
+    createdAt:
+      typeof parsed.createdAt === "string"
+        ? parsed.createdAt
+        : new Date().toISOString(),
+    targetOrigin:
+      typeof parsed.targetOrigin === "string" ? parsed.targetOrigin : "",
+    targetRpId: stringOrNull(parsed.targetRpId) ?? "bindle.cash",
+    smartWalletAddress,
+    credential: {
+      id: parsed.credential.id as string,
+      publicKey,
+      rpId: stringOrNull(parsed.credential.rpId) ?? stringOrNull(parsed.targetRpId) ?? "bindle.cash",
+      authenticatorAttachment,
+      userVerification
+    }
+  };
+};
+
+export const migrationPasskeyFromOwnerEnrollment = (
+  enrollment: BindleOwnerEnrollmentCode
+): MigrationPasskey => ({
+  id: enrollment.credential.id,
+  publicKey: enrollment.credential.publicKey,
+  rpId: enrollment.credential.rpId,
+  createdAt: enrollment.createdAt,
+  authenticatorKind: authenticatorKindFromAttachment(
+    enrollment.credential.authenticatorAttachment
+  ),
+  authenticatorAttachment: enrollment.credential.authenticatorAttachment,
+  userVerification: enrollment.credential.userVerification
+});
 
 export const createReplacementPasskey = async ({
   authenticatorKind = "platform"
@@ -393,6 +520,14 @@ export const submitPasskeyOwnerMigration = async ({
 }): Promise<MigrationSubmission> => {
   assertMigratableExport(accountExport);
 
+  if (
+    replacementPasskey.rpId !== canonicalRpId &&
+    accountExport.wallet.smartWalletAddress &&
+    !isAddress(accountExport.wallet.smartWalletAddress)
+  ) {
+    throw new Error("Export does not contain a valid smart-wallet address.");
+  }
+
   const ethereumRpcUrl = endpoints.ethereumRpcUrl.trim();
   const bundlerUrl = endpoints.bundlerUrl.trim();
   const paymasterUrl = endpoints.paymasterUrl.trim();
@@ -477,6 +612,7 @@ export const buildUpdatedAccountExport = ({
     migratedAt,
     newPasskeyCredentialId: replacementPasskey.id,
     newPasskeyPublicKey: replacementPasskey.publicKey,
+    newPasskeyRpId: replacementPasskey.rpId,
     newPasskeyAuthenticatorKind: replacementPasskey.authenticatorKind,
     newPasskeyAuthenticatorAttachment:
       replacementPasskey.authenticatorAttachment,
@@ -494,7 +630,7 @@ export const buildUpdatedAccountExport = ({
       passkeyPresent: true,
       passkeyCredentialId: replacementPasskey.id,
       passkeyPublicKey: replacementPasskey.publicKey,
-      passkeyRpId: canonicalRpId,
+      passkeyRpId: replacementPasskey.rpId,
       passkeyAuthenticatorAttachment: replacementPasskey.authenticatorAttachment,
       passkeyUserVerification: replacementPasskey.userVerification,
       smartWalletAddress: accountExport.wallet.smartWalletAddress,
@@ -510,7 +646,7 @@ export const buildUpdatedAccountExport = ({
         ...accountExport.warnings,
         "This export contains replacement passkey metadata but not WebAuthn private key material.",
         "Use this export only after the owner-add UserOperation succeeds, or keep the old export until migration is complete.",
-        "Bindle on bindle.cash must honor passkeyRpId: bindle.me for this passkey to sign there.",
+        `Bindle must honor passkeyRpId: ${replacementPasskey.rpId} for this passkey to sign.`,
         "Security-key exports require the hardware key to be present when signing."
       ])
     ]
