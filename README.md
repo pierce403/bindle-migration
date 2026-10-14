@@ -45,3 +45,11 @@ pnpm install
 pnpm run typecheck
 pnpm run build
 ```
+
+## Cloudflare hosting
+
+Native Git publishes main with the pinned pnpm lockfile and build:cloudflare,
+then npm run deploy. Original build and Pages recovery are retained. Credentials
+stay in Cloudflare; previews are disabled. Browser analytics are not injected;
+Cloudflare zone request/status metrics provide hosting usage. Wallet, passkey,
+cryptography and user-triggered network behavior are unchanged.
