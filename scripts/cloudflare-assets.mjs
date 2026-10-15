@@ -8,7 +8,7 @@ if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid source revision')
 mkdirSync(resolve(output, '.well-known'), { recursive: true });
 writeFileSync(resolve(output, '.well-known/cloudflare-build.json'), JSON.stringify({ repository: "pierce403/bindle-migration", revision }, null, 2) + '\n');
 writeFileSync(resolve(output, '404.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><title>Page not found</title><h1>Page not found</h1><p><a href="/">Return home</a></p></html>\n');
-appendFileSync(resolve(output, '_headers'), '\n/.well-known/cloudflare-build.json\n  Cache-Control: no-store\n');
+appendFileSync(resolve(output, '_headers'), '\n/*\n  Cache-Control: public, max-age=0, must-revalidate, no-transform\n/.well-known/cloudflare-build.json\n  Cache-Control: no-store\n');
 console.log('Cloudflare static assets prepared at ' + revision);
 
 const files = [];

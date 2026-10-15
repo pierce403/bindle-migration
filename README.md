@@ -53,3 +53,8 @@ then npm run deploy. Original build and Pages recovery are retained. Credentials
 stay in Cloudflare; previews are disabled. Browser analytics are not injected;
 Cloudflare zone request/status metrics provide hosting usage. Wallet, passkey,
 cryptography and user-triggered network behavior are unchanged.
+
+Cloudflare responses use no-transform to preserve the browser-analytics exclusion
+even when edge-side automatic injection is available. Hosting usage remains in
+zone request/status metrics. See Cloudflare Web Analytics setup documentation:
+https://developers.cloudflare.com/web-analytics/get-started/ .
